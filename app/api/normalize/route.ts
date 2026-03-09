@@ -1,9 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 import { normalizeDataset, NormRule, PLAN_LIMITS } from "@/lib/normalizer";
-import { prisma } from "@/lib/prisma";
 import { v4 as uuid } from "uuid";
 
 export const maxDuration = 60;
+
+// Try to import prisma — may fail if DATABASE_URL not set
+async function tryPersist(jobData: {
+  userId: string;
+  name: string;
+  rowCount: number;
+  dupCount: number;
+  rules: string;
+  results: Array<{
+    rowIndex: number;
+    original: Record<string, unknown>;
+    normalized: Record<string, unknown>;
+    changes: Array<{ field: string; from: string | null; to: string | null; rule: string }>;
+    isDuplicate: boolean;
+  }>;
+}) {
+  try {
+    const { prisma } = await import("@/lib/prisma");
+    const job = await prisma.normJob.create({
+      data: {
+        userId: jobData.userId,
+        name: jobData.name,
+        status: "done",
+        inputFormat: "json",
+        rowCount: jobData.rowCount,
+        dupCount: jobData.dupCount,
+        rules: jobData.rules,
+      },
+    });
+
+    const toInsert = jobData.results.slice(0, 5000);
+    if (toInsert.length > 0) {
+      await prisma.normResult.createMany({
+        data: toInsert.map((r) => ({
+          jobId: job.id,
+          rowIndex: r.rowIndex,
+          original: JSON.stringify(r.original),
+          normalized: JSON.stringify(r.normalized),
+          changes: JSON.stringify(r.changes),
+          isDuplicate: r.isDuplicate,
+        })),
+      });
+    }
+
+    return job.id;
+  } catch {
+    // DB not available (e.g., Vercel without Turso) — return ephemeral ID
+    return uuid();
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,62 +68,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No data provided" }, { status: 400 });
     }
 
-    // Check plan limits if userId provided
-    let user = null;
+    // Check plan limits
     if (userId) {
-      user = await prisma.user.findUnique({ where: { id: userId } });
-      if (user) {
-        const limit = PLAN_LIMITS[user.plan] ?? PLAN_LIMITS.free;
-        if (data.length > limit) {
-          return NextResponse.json(
-            { error: `Your plan allows up to ${limit} rows. Upgrade for more.` },
-            { status: 402 }
-          );
+      try {
+        const { prisma } = await import("@/lib/prisma");
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (user) {
+          const limit = PLAN_LIMITS[user.plan] ?? PLAN_LIMITS.free;
+          if (data.length > limit) {
+            return NextResponse.json(
+              { error: `Your plan allows up to ${limit} rows. Upgrade for more.` },
+              { status: 402 }
+            );
+          }
         }
+      } catch {
+        // DB not available, skip plan check for demo
       }
     }
 
-    // Create demo user if none
-    if (!user) {
-      const demoEmail = `demo-${uuid()}@datanorm.app`;
-      user = await prisma.user.create({
-        data: { email: demoEmail, plan: "free" },
-      });
-    }
-
-    // Run normalization
+    // Run normalization (core engine — always works)
     const summary = normalizeDataset(data, rules);
 
-    // Persist job
-    const job = await prisma.normJob.create({
-      data: {
-        userId: user.id,
-        name: jobName ?? `Job ${new Date().toLocaleString()}`,
-        status: "done",
-        inputFormat: "json",
-        rowCount: summary.totalRows,
-        dupCount: summary.dupRows,
-        rules: JSON.stringify(rules),
-      },
+    // Try to persist to DB
+    const ephemeralUserId = userId ?? `demo-${uuid()}`;
+    const jobId = await tryPersist({
+      userId: ephemeralUserId,
+      name: jobName ?? `Job ${new Date().toLocaleString()}`,
+      rowCount: summary.totalRows,
+      dupCount: summary.dupRows,
+      rules: JSON.stringify(rules),
+      results: summary.results,
     });
 
-    // Persist results (batch insert top 5000)
-    const toInsert = summary.results.slice(0, 5000);
-    if (toInsert.length > 0) {
-      await prisma.normResult.createMany({
-        data: toInsert.map((r) => ({
-          jobId: job.id,
-          rowIndex: r.rowIndex,
-          original: JSON.stringify(r.original),
-          normalized: JSON.stringify(r.normalized),
-          changes: JSON.stringify(r.changes),
-          isDuplicate: r.isDuplicate,
-        })),
-      });
-    }
-
     return NextResponse.json({
-      jobId: job.id,
+      jobId,
       totalRows: summary.totalRows,
       dupRows: summary.dupRows,
       changesCount: summary.changesCount,

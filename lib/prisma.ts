@@ -1,25 +1,38 @@
+/**
+ * Prisma client setup with libsql adapter.
+ * For local dev: file-based SQLite via DATABASE_URL.
+ * For Vercel: set DATABASE_URL to a Turso remote URL or leave blank to skip persistence.
+ */
+
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
-import path from "path";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-function createPrisma() {
-  const dbPath = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
-  const filePath = dbPath.startsWith("file:") ? dbPath.slice(5) : dbPath;
-  const absolutePath = path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
+function createPrisma(): PrismaClient {
+  const rawUrl = process.env.DATABASE_URL;
 
-  const adapter = new PrismaLibSql({
-    url: `file:${absolutePath}`,
-  });
+  if (!rawUrl) {
+    throw new Error("DATABASE_URL is not set");
+  }
 
-  return new PrismaClient({ adapter, log: ["error"] });
+  // Support both file: paths and remote turso URLs
+  const adapter = new PrismaLibSql({ url: rawUrl });
+  return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrisma();
+let prismaInstance: PrismaClient | null = null;
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+function getPrisma(): PrismaClient {
+  if (globalForPrisma.prisma) return globalForPrisma.prisma;
+  if (prismaInstance) return prismaInstance;
+  prismaInstance = createPrisma();
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = prismaInstance;
+  }
+  return prismaInstance;
+}
+
+export const prisma = getPrisma();

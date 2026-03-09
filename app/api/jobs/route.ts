@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -9,11 +8,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }
 
-  const jobs = await prisma.normJob.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-
-  return NextResponse.json({ jobs });
+  try {
+    const { prisma } = await import("@/lib/prisma");
+    const jobs = await prisma.normJob.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return NextResponse.json({ jobs });
+  } catch {
+    return NextResponse.json({ jobs: [] });
+  }
 }
