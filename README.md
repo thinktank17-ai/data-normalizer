@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DataNorm AI — AI-Powered Data Normalization
 
-## Getting Started
+> Upload messy CSV or JSON. Get back clean, standardized, deduplicated data in seconds.
 
-First, run the development server:
+**Live:** https://data-normalizer.vercel.app  
+**GitHub:** https://github.com/thinktank17-ai/data-normalizer
+
+---
+
+## What It Does
+
+DataNorm AI normalizes raw datasets with zero code:
+
+| Feature | Detail |
+|---|---|
+| **Format Standardization** | Dates → ISO 8601, phones → (XXX) XXX-XXXX, emails → lowercase, URLs → https://, currency → 2 decimals, booleans → true/false |
+| **Deduplication** | Exact match + fuzzy Levenshtein similarity (85% threshold) |
+| **Null Cleanup** | Replaces "N/A", "none", "null", "-", "" with actual null |
+| **Change Audit** | Full field-by-field before/after report |
+| **Export** | Download normalized CSV or JSON |
+
+## Tech Stack
+
+- **Framework:** Next.js 16 (App Router)
+- **Styling:** Tailwind CSS v4
+- **Database:** SQLite (local) / Turso (production)
+- **ORM:** Prisma 7 + libsql adapter
+- **Payments:** Stripe (ready to wire)
+- **Deployment:** Vercel
+
+## Revenue Model
+
+| Plan | Price | Rows/Month |
+|---|---|---|
+| Free | $0 | 500 |
+| Pro | $29/mo | 50,000 |
+| Team | $79/mo | 500,000 |
+
+## Local Development
 
 ```bash
+npm install
+cp .env.example .env   # set DATABASE_URL=file:./prisma/dev.db
+npx prisma migrate dev
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Normalization Rules
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The core engine (`lib/normalizer.ts`) auto-detects field types using:
+1. **Name-based inference** — field names containing "date", "phone", "email", etc.
+2. **Value-based inference** — pattern matching on sample data
+3. **Manual override** — users can toggle individual rules
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## API
 
-## Learn More
+```bash
+POST /api/normalize
+Content-Type: application/json
 
-To learn more about Next.js, take a look at the following resources:
+{
+  "data": [{"name": "john smith", "email": "JOHN@EXAMPLE.COM", "date": "03/15/2024"}],
+  "rules": ["names", "emails", "dates", "dedup", "nulls"],
+  "jobName": "My Dataset"
+}
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Returns normalized rows with `changes` array showing exactly what was modified.
