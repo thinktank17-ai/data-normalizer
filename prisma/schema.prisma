@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  plan          String    @default("free") // free | pro | team
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  recordsThisMonth Int    @default(0)
+  monthlyResetAt DateTime @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  jobs          NormJob[]
+}
+
+model NormJob {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  name        String
+  status      String   @default("pending") // pending | processing | done | error
+  inputFormat String   // csv | json
+  rowCount    Int      @default(0)
+  dupCount    Int      @default(0)
+  rules       String   // JSON array of NormRule
+  outputUrl   String?
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  results     NormResult[]
+}
+
+model NormResult {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       NormJob  @relation(fields: [jobId], references: [id])
+  rowIndex  Int
+  original  String   // JSON
+  normalized String  // JSON
+  changes   String   // JSON array of {field, from, to, rule}
+  isDuplicate Boolean @default(false)
+  createdAt DateTime @default(now())
+}
